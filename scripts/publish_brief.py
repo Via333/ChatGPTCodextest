@@ -4,12 +4,16 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
+import hmac
 import html
 import json
 import os
 import re
 import subprocess
 import sys
+import time
 import urllib.request
 from dataclasses import dataclass
 from datetime import date
@@ -310,7 +314,13 @@ def publish(brief: Brief) -> str:
     return f"briefs/{brief.slug}.html"
 
 
-def send_feishu(webhook: str, title: str, summary: str, url: str) -> None:
+def feishu_signature(secret: str, timestamp: str) -> str:
+    string_to_sign = f"{timestamp}\n{secret}".encode("utf-8")
+    digest = hmac.new(string_to_sign, b"", digestmod=hashlib.sha256).digest()
+    return base64.b64encode(digest).decode("utf-8")
+
+
+def send_feishu(webhook: str, title: str, summary: str, url: str, secret: str = "") -> None:
     payload = {
         "msg_type": "interactive",
         "card": {
@@ -335,6 +345,10 @@ def send_feishu(webhook: str, title: str, summary: str, url: str) -> None:
             ],
         },
     }
+    if secret:
+        timestamp = str(int(time.time()))
+        payload["timestamp"] = timestamp
+        payload["sign"] = feishu_signature(secret, timestamp)
     request = urllib.request.Request(
         webhook,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -380,7 +394,8 @@ def main() -> int:
         if not webhook:
             print("FEISHU_WEBHOOK is missing; skip Feishu send.", file=sys.stderr)
             return 2
-        send_feishu(webhook, brief.title, brief.summary, public_url)
+        secret = os.environ.get("FEISHU_SECRET", "").strip()
+        send_feishu(webhook, brief.title, brief.summary, public_url, secret)
 
     print(public_url)
     return 0
