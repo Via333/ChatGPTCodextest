@@ -314,6 +314,15 @@ def publish(brief: Brief) -> str:
     return f"briefs/{brief.slug}.html"
 
 
+def rebuild_all_briefs(site_url: str | None = None) -> None:
+    paths = sorted((ROOT / "content" / "briefs").glob("*.md"))
+    if not paths:
+        return
+    save_feed([])
+    for path in paths:
+        publish(read_brief(path, site_url))
+
+
 def feishu_signature(secret: str, timestamp: str) -> str:
     string_to_sign = f"{timestamp}\n{secret}".encode("utf-8")
     digest = hmac.new(string_to_sign, b"", digestmod=hashlib.sha256).digest()
@@ -375,7 +384,20 @@ def send_feishu(webhook: str, title: str, summary: str, url: str, secret: str = 
 
 
 def git_commit_and_push(message: str) -> None:
-    subprocess.run(["git", "add", "."], cwd=ROOT, check=True)
+    subprocess.run(
+        [
+            "git",
+            "add",
+            "--",
+            "content/briefs",
+            "briefs",
+            "archive/index.html",
+            "feed.json",
+            "index.html",
+        ],
+        cwd=ROOT,
+        check=True,
+    )
     diff = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=ROOT)
     if diff.returncode == 0:
         return
@@ -390,6 +412,7 @@ def main() -> int:
     parser.add_argument("--site-url", default=os.environ.get("SITE_URL", "").strip(), help="Public GitHub Pages base URL")
     parser.add_argument("--send-feishu", action="store_true", help="Send Feishu card after publishing")
     parser.add_argument("--push", action="store_true", help="Commit and push changes with git")
+    parser.add_argument("--rebuild-all", action="store_true", help="Rebuild every Markdown brief page before optional push/send")
     args = parser.parse_args()
 
     brief_path = args.brief if args.brief.is_absolute() else ROOT / args.brief
@@ -398,7 +421,11 @@ def main() -> int:
         return 1
 
     brief = read_brief(brief_path, args.site_url)
-    relative_url = publish(brief)
+    if args.rebuild_all:
+        rebuild_all_briefs(args.site_url)
+        relative_url = f"briefs/{brief.slug}.html"
+    else:
+        relative_url = publish(brief)
     public_url = (args.site_url.rstrip("/") + "/" + relative_url) if args.site_url else relative_url
 
     if args.push:
